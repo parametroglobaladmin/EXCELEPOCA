@@ -6,12 +6,38 @@ from openpyxl.utils import get_column_letter
 
 app = Flask(__name__)
 
-HTML_PAGE = r"""<!doctype html><html lang='pt'><head><meta charset='utf-8'/><meta name='viewport' content='width=device-width, initial-scale=1'/><title>Excel -&gt; Odoo CSV</title></head><body><h1>Excel -&gt; Odoo CSV</h1><form action='/convert' method='post' enctype='multipart/form-data'><input name='file' type='file' accept='.xlsx' required /><button type='submit'>Converter</button></form></body></html>"""
+HTML_PAGE = """
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="utf-8" />
+    <title>Excel → Odoo CSV</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 3rem; background:#fafafa; }
+      .card { max-width: 700px; margin: auto; background:white; padding:2rem; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,.08); }
+      h1 { margin-top: 0; }
+      input[type=file] { width:100%; padding:.7rem; border:1px solid #ccc; border-radius:6px; margin-top:.5rem; }
+      button { margin-top:1rem; padding:.8rem 1.5rem; background:#111827; color:white; border:0; border-radius:8px; cursor:pointer; font-weight:600; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Excel → CSV (Odoo Base64)</h1>
+      <form action="/convert" method="post" enctype="multipart/form-data">
+        <label for="file">Seleciona um ficheiro Excel (.xlsx)</label>
+        <input id="file" name="file" type="file" accept=".xlsx" required />
+        <button type="submit">Converter</button>
+      </form>
+    </div>
+  </body>
+</html>
+"""
 
-def excel_to_csv_bytes(xlsx_bytes: bytes, sheet_name: str | None, delimiter: str, quote_all: bool, keep_headers: bool) -> bytes:
+def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
-    ws = wb[sheet_name] if sheet_name and sheet_name in wb.sheetnames else wb.active
+    ws = wb.active
 
+    # Extrair imagens e converter em Base64
     image_map = {}
     for image in getattr(ws, "_images", []):
         try:
@@ -24,14 +50,15 @@ def excel_to_csv_bytes(xlsx_bytes: bytes, sheet_name: str | None, delimiter: str
         except Exception:
             continue
 
+    # Ler dados (valores, não fórmulas)
     data = list(ws.values)
     if not data or not data[0]:
-        raise ValueError("Folha vazia ou sem cabeçalhos.")
-
+        raise ValueError("O ficheiro não contém dados válidos.")
     columns = data[0]
-    rows = data[1:] if len(data) > 1 else []
+    rows = data[1:]
     df = pd.DataFrame(rows, columns=columns)
 
+    # Substituir coluna IMAGE pelos Base64
     if "IMAGE" in df.columns:
         col_idx = list(df.columns).index("IMAGE") + 1
         col_letter = get_column_letter(col_idx)
@@ -40,10 +67,9 @@ def excel_to_csv_bytes(xlsx_bytes: bytes, sheet_name: str | None, delimiter: str
             if cell_ref in image_map:
                 df.at[i, "IMAGE"] = image_map[cell_ref]
 
-    import io as _io
-    buf = _io.StringIO()
-    quoting = csv.QUOTE_ALL if quote_all else csv.QUOTE_MINIMAL
-    df.to_csv(buf, index=False, header=keep_headers, sep=delimiter, quoting=quoting, encoding="utf-8")
+    # Exportar CSV compatível com Odoo
+    buf = io.StringIO()
+    df.to_csv(buf, index=False, header=True, sep=";", quoting=csv.QUOTE_ALL, encoding="utf-8")
     return buf.getvalue().encode("utf-8")
 
 @app.get("/")
@@ -53,25 +79,19 @@ def index():
 @app.post("/convert")
 def convert():
     if "file" not in request.files:
-        return ("Ficheiro não enviado.", 400)
-
+        return ("Nenhum ficheiro enviado.", 400)
     f = request.files["file"]
-    xlsx = f.read()
-
-    delimiter = request.form.get("delimiter", ";")
-    quote_all = request.form.get("quoteall", "1") == "1"
-    keep_headers = request.form.get("keep_headers", "1") == "1"
-    sheet_name = request.form.get("sheet") or None
-
     try:
-        csv_bytes = excel_to_csv_bytes(xlsx, sheet_name, delimiter, quote_all, keep_headers)
+        csv_bytes = excel_to_odoo_csv(f.read())
     except Exception as e:
-        return ("Erro a converter: " + str(e), 400)
-
-    out_name = (os.path.splitext(f.filename or "export.xlsx")[0] + ".csv").replace('"','')
+        return (f"Erro ao converter: {e}", 400)
+    out_name = os.path.splitext(f.filename or "export.xlsx")[0] + "_odoo.csv"
     return Response(
         csv_bytes,
-        headers={"Content-Type": "text/csv; charset=utf-8", "Content-Disposition": "attachment; filename=" + out_name},
+        headers={
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": f"attachment; filename={out_name}",
+        },
         status=200,
     )
 
