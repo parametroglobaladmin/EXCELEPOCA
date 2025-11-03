@@ -1,4 +1,4 @@
-import io, os, csv, base64
+import io, os, csv, base64, re
 import pandas as pd
 from flask import Flask, request, Response
 from openpyxl import load_workbook
@@ -86,7 +86,17 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     if current_line:
         cleaned_lines.append(current_line)
 
-    cleaned_csv = "\n".join(cleaned_lines)
+    # Limpar espaços dentro de campos entre aspas e remover #VALUE!
+    final_lines = []
+    for line in cleaned_lines:
+        # remove "#VALUE!"
+        line = line.replace("#VALUE!", "")
+        # remove espaços após aspas de abertura
+        line = re.sub(r'";\s*"', '";"', line)
+        line = re.sub(r'"\s+', '"', line)
+        final_lines.append(line)
+
+    cleaned_csv = "\n".join(final_lines)
     return cleaned_csv.encode("utf-8")
 
 @app.get("/")
