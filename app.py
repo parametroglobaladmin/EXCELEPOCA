@@ -11,7 +11,7 @@ HTML_PAGE = """
 <html lang="pt">
   <head>
     <meta charset="utf-8" />
-    <title>Excel → Odoo CSV dsadsadsa</title>
+    <title>Excel → Odoo CSV</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 3rem; background:#fafafa; }
       .card { max-width: 700px; margin: auto; background:white; padding:2rem; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,.08); }
@@ -70,7 +70,24 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     # Exportar CSV compatível com Odoo
     buf = io.StringIO()
     df.to_csv(buf, index=False, header=True, sep=";", quoting=csv.QUOTE_ALL, encoding="utf-8")
-    return buf.getvalue().encode("utf-8")
+    csv_data = buf.getvalue()
+
+    # --- LIMPEZA FINAL ---
+    cleaned_lines = []
+    current_line = ""
+    for raw_line in csv_data.splitlines():
+        line = raw_line.rstrip("\n").rstrip("\r")
+        if line.startswith('"') or line.startswith("Ref n."):
+            if current_line:
+                cleaned_lines.append(current_line)
+            current_line = line
+        else:
+            current_line += " " + line.strip()
+    if current_line:
+        cleaned_lines.append(current_line)
+
+    cleaned_csv = "\n".join(cleaned_lines)
+    return cleaned_csv.encode("utf-8")
 
 @app.get("/")
 def index():
