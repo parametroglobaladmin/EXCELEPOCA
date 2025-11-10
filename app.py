@@ -77,23 +77,21 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     current_line = ""
     for raw_line in csv_data.splitlines():
         line = raw_line.rstrip("\n").rstrip("\r")
-
-        # Nova linha só se começar com cabeçalho ou com número entre aspas
-        if re.match(r'^"(\d+)"', line) or line.startswith('"Ref n.'):
+        if line.startswith('"') or line.startswith("Ref n."):
             if current_line:
                 cleaned_lines.append(current_line)
             current_line = line
         else:
-            # Junta à linha anterior (continuação)
             current_line += " " + line.strip()
-
     if current_line:
         cleaned_lines.append(current_line)
 
-    # Limpar espaços e erros
+    # Limpar espaços dentro de campos entre aspas e remover #VALUE!
     final_lines = []
     for line in cleaned_lines:
+        # remove "#VALUE!"
         line = line.replace("#VALUE!", "")
+        # remove espaços após aspas de abertura
         line = re.sub(r'";\s*"', '";"', line)
         line = re.sub(r'"\s+', '"', line)
         final_lines.append(line)
