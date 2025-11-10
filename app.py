@@ -89,14 +89,18 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     # Limpar espaços dentro de campos entre aspas e remover #VALUE!
     final_lines = []
     for line in cleaned_lines:
-        # remove "#VALUE!"
         line = line.replace("#VALUE!", "")
-        # remove espaços após aspas de abertura
         line = re.sub(r'";\s*"', '";"', line)
         line = re.sub(r'"\s+', '"', line)
         final_lines.append(line)
 
-    cleaned_csv = "\n".join(final_lines)
+    # ➜ Filtrar linhas que não começam com "número"
+    validated_lines = []
+    for line in final_lines:
+        if line.startswith('"Ref n.') or re.match(r'^"\d{1,3}"', line):
+            validated_lines.append(line)
+
+    cleaned_csv = "\n".join(validated_lines)
     return cleaned_csv.encode("utf-8")
 
 @app.get("/")
