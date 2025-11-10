@@ -77,16 +77,20 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     current_line = ""
     for raw_line in csv_data.splitlines():
         line = raw_line.rstrip("\n").rstrip("\r")
-        if line.startswith('"') or line.startswith("Ref n."):
+
+        # Nova linha só se começar com cabeçalho ou com número entre aspas
+        if re.match(r'^"(\d+)"', line) or line.startswith('"Ref n.'):
             if current_line:
                 cleaned_lines.append(current_line)
             current_line = line
         else:
+            # Junta à linha anterior (continuação)
             current_line += " " + line.strip()
+
     if current_line:
         cleaned_lines.append(current_line)
 
-    # Limpar espaços dentro de campos entre aspas e remover #VALUE!
+    # Limpar espaços e erros
     final_lines = []
     for line in cleaned_lines:
         line = line.replace("#VALUE!", "")
@@ -94,13 +98,7 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
         line = re.sub(r'"\s+', '"', line)
         final_lines.append(line)
 
-    # ➜ Filtrar linhas que não começam com "número"
-    validated_lines = []
-    for line in final_lines:
-        if line.startswith('"Ref n.') or re.match(r'^"\d{1,3}"', line):
-            validated_lines.append(line)
-
-    cleaned_csv = "\n".join(validated_lines)
+    cleaned_csv = "\n".join(final_lines)
     return cleaned_csv.encode("utf-8")
 
 @app.get("/")
