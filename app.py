@@ -72,28 +72,59 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     df.to_csv(buf, index=False, header=True, sep=";", quoting=csv.QUOTE_ALL, encoding="utf-8")
     csv_data = buf.getvalue()
 
-    # --- LIMPEZA FINAL ---
+    # --- LIMPEZA FINAL E COMPACTAÇÃO ---
     cleaned_lines = []
     current_line = ""
     for raw_line in csv_data.splitlines():
         line = raw_line.rstrip("\n").rstrip("\r")
+
+        # ignora linhas totalmente vazias
+        if not line.strip():
+            continue
+
+        # lógica de reconstrução de linhas que pertencem à mesma célula
         if line.startswith('"') or line.startswith("Ref n."):
             if current_line:
                 cleaned_lines.append(current_line)
             current_line = line
         else:
             current_line += " " + line.strip()
+
     if current_line:
         cleaned_lines.append(current_line)
 
-    # Limpar espaços dentro de campos entre aspas e remover #VALUE!
+    # PROCESSAMENTO DE COMPACTAÇÃO
     final_lines = []
     for line in cleaned_lines:
-        # remove "#VALUE!"
+
+        # remover "#VALUE!"
         line = line.replace("#VALUE!", "")
-        # remove espaços após aspas de abertura
+
+        # remover caracteres invisíveis
+        line = re.sub(r"[\t\r\u200B\u200C\u200D]+", "", line)
+
+        # remover espaços após abertura ou antes de fecho de aspas
         line = re.sub(r'";\s*"', '";"', line)
         line = re.sub(r'"\s+', '"', line)
+        line = re.sub(r'\s+"', '"', line)
+
+        # compactar espaços múltiplos fora de Base64
+        parts = line.split(";")
+        compacted = []
+        for p in parts:
+            if re.match(r'^[A-Za-z0-9+/=]+$', p.strip('"')):  
+                # provavel Base64 → NÃO tocar
+                compacted.append(p)
+            else:
+                # compactar múltiplos espaços → 1
+                p2 = re.sub(r"\s{2,}", " ", p)
+                compacted.append(p2)
+
+        line = ";".join(compacted)
+
+        # remover semicolons sobrantes no fim de linha
+        line = line.rstrip(";")
+
         final_lines.append(line)
 
     cleaned_csv = "\n".join(final_lines)
