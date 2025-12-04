@@ -37,7 +37,7 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
     wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
     ws = wb.active
 
-    # Extrair imagens e converter para Base64
+    # Extrair imagens e converter em Base64
     image_map = {}
     for image in getattr(ws, "_images", []):
         try:
@@ -50,16 +50,15 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
         except Exception:
             continue
 
-    # Ler valores
+    # Ler dados (valores, não fórmulas)
     data = list(ws.values)
     if not data or not data[0]:
         raise ValueError("O ficheiro não contém dados válidos.")
-
     columns = data[0]
     rows = data[1:]
     df = pd.DataFrame(rows, columns=columns)
 
-    # Substituir coluna IMAGE com Base64
+    # Substituir coluna IMAGE pelos Base64
     if "IMAGE" in df.columns:
         col_idx = list(df.columns).index("IMAGE") + 1
         col_letter = get_column_letter(col_idx)
@@ -68,84 +67,36 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
             if cell_ref in image_map:
                 df.at[i, "IMAGE"] = image_map[cell_ref]
 
-    # Exportar CSV
+    # Exportar CSV compatível com Odoo
     buf = io.StringIO()
     df.to_csv(buf, index=False, header=True, sep=";", quoting=csv.QUOTE_ALL, encoding="utf-8")
     csv_data = buf.getvalue()
 
-    # --- LIMPEZA FINAL E RECONSTRUÇÃO ---
+    # --- LIMPEZA FINAL ---
     cleaned_lines = []
     current_line = ""
     for raw_line in csv_data.splitlines():
         line = raw_line.rstrip("\n").rstrip("\r")
-
-        if not line.strip():
-            continue
-
         if line.startswith('"') or line.startswith("Ref n."):
             if current_line:
                 cleaned_lines.append(current_line)
             current_line = line
         else:
             current_line += " " + line.strip()
-
     if current_line:
         cleaned_lines.append(current_line)
 
-    # Processamento extra para reduzir tamanho e corrigir estrutura
+    # Limpar espaços dentro de campos entre aspas e remover #VALUE!
     final_lines = []
     for line in cleaned_lines:
-
-        # Remove #VALUE!
+        # remove "#VALUE!"
         line = line.replace("#VALUE!", "")
-
-        # Remover caracteres invisíveis
-        line = re.sub(r"[\t\r\u200B\u200C\u200D]+", "", line)
-
-        # Limpar espaços indesejados dentro de campos entre aspas
+        # remove espaços após aspas de abertura
         line = re.sub(r'";\s*"', '";"', line)
         line = re.sub(r'"\s+', '"', line)
-        line = re.sub(r'\s+"', '"', line)
-
-        # Compactar espaços em partes não Base64
-        parts = line.split(";")
-        compacted = []
-        for p in parts:
-            inner = p.strip('"')
-            if re.match(r"^[A-Za-z0-9+/=]+$", inner):
-                compacted.append(p)
-            else:
-                compacted.append(re.sub(r"\s{2,}", " ", p))
-        line = ";".join(compacted)
-
-        line = line.rstrip(";")
         final_lines.append(line)
 
     cleaned_csv = "\n".join(final_lines)
-
-    # --- GARANTIA ABSOLUTA DE CSV COMPATÍVEL COM ODOO ---
-    cleaned_csv = cleaned_csv.replace("\ufeff", "")
-    cleaned_csv = cleaned_csv.replace("\r\n", "\n").replace("\r", "\n")
-    cleaned_csv = cleaned_csv.strip() + "\n"
-
-    # Garantir colunas corretas
-    lines = cleaned_csv.split("\n")
-    header_cols = lines[0].count(";")
-
-    valid_lines = []
-    for ln in lines:
-        if not ln.strip():
-            continue
-
-        # Reforça numero de colunas
-        missing = header_cols - ln.count(";")
-        if missing > 0:
-            ln += ";" * missing
-
-        valid_lines.append(ln)
-
-    cleaned_csv = "\n".join(valid_lines) + "\n"
-
     return cleaned_csv.encode("utf-8")
 
 @app.get("/")
@@ -156,16 +107,12 @@ def index():
 def convert():
     if "file" not in request.files:
         return ("Nenhum ficheiro enviado.", 400)
-
     f = request.files["file"]
-
     try:
         csv_bytes = excel_to_odoo_csv(f.read())
     except Exception as e:
         return (f"Erro ao converter: {e}", 400)
-
     out_name = os.path.splitext(f.filename or "export.xlsx")[0] + "_odoo.csv"
-
     return Response(
         csv_bytes,
         headers={
