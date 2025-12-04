@@ -67,20 +67,37 @@ def excel_to_odoo_csv(xlsx_bytes: bytes) -> bytes:
             if cell_ref in image_map:
                 df.at[i, "IMAGE"] = image_map[cell_ref]
 
-    # Otimização: Limpar dados antes de exportar para reduzir tamanho
-    # Remove #VALUE!
-    df = df.replace("#VALUE!", "", regex=True)
-    # Substitui quebras de linha por espaço
-    df = df.replace(r'[\n\r]+', ' ', regex=True)
-    # Remove espaços em branco no início e fim das células (trim)
-    df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-
-    # Exportar CSV compatível com Odoo (QUOTE_MINIMAL reduz drasticamente o tamanho)
+    # Exportar CSV compatível com Odoo
     buf = io.StringIO()
     df.to_csv(buf, index=False, header=True, sep=";", quoting=csv.QUOTE_MINIMAL, encoding="utf-8")
     csv_data = buf.getvalue()
 
-    return csv_data.encode("utf-8")
+    # --- LIMPEZA FINAL ---
+    cleaned_lines = []
+    current_line = ""
+    for raw_line in csv_data.splitlines():
+        line = raw_line.rstrip("\n").rstrip("\r")
+        if line.startswith('"') or line.startswith("Ref n."):
+            if current_line:
+                cleaned_lines.append(current_line)
+            current_line = line
+        else:
+            current_line += " " + line.strip()
+    if current_line:
+        cleaned_lines.append(current_line)
+
+    # Limpar espaços dentro de campos entre aspas e remover #VALUE!
+    final_lines = []
+    for line in cleaned_lines:
+        # remove "#VALUE!"
+        line = line.replace("#VALUE!", "")
+        # remove espaços após aspas de abertura
+        line = re.sub(r'";\s*"', '";"', line)
+        line = re.sub(r'"\s+', '"', line)
+        final_lines.append(line)
+
+    cleaned_csv = "\n".join(final_lines)
+    return cleaned_csv.encode("utf-8")
 
 @app.get("/")
 def index():
